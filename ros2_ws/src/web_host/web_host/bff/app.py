@@ -858,7 +858,7 @@ def create_app(
 
     @app.get('/api/motion/sources')
     async def get_motion_sources() -> dict[str, list[str]]:
-        return {'sources': motion_jobs.sources()}
+        return {'sources': await asyncio.to_thread(motion_jobs.sources)}
 
     @app.post('/api/motion/sources/status')
     async def post_motion_sources_status(request: Request) -> dict[str, Any]:
@@ -871,7 +871,7 @@ def create_app(
             raise HTTPException(status_code=400, detail={'error': '动作请求必须是 JSON 对象'})
         payload.pop('bvh_text', None)
         try:
-            return {'sources': source_statuses(motion_jobs, payload)}
+            return {'sources': await asyncio.to_thread(source_statuses, motion_jobs, payload)}
         except ImportError as exc:
             raise HTTPException(
                 status_code=503,
@@ -890,7 +890,7 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail={'error': '动作请求必须是 JSON 对象'})
         try:
-            return motion_jobs.create(payload)
+            return await asyncio.to_thread(motion_jobs.create, payload)
         except ImportError as exc:
             raise HTTPException(
                 status_code=503,
@@ -911,7 +911,8 @@ def create_app(
         if type(payload.get('remember_mapping', False)) is not bool:
             raise HTTPException(status_code=400, detail={'error': '记住映射选项必须为布尔值'})
         try:
-            return motion_jobs.start(
+            return await asyncio.to_thread(
+                motion_jobs.start,
                 job_id,
                 payload.get('mapping'),
                 remember=payload.get('remember_mapping', False),
@@ -924,7 +925,7 @@ def create_app(
     @app.get('/api/motion/jobs/{job_id}')
     async def get_motion_job(job_id: str) -> dict[str, Any]:
         try:
-            return motion_jobs.status(job_id)
+            return await asyncio.to_thread(motion_jobs.status, job_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail={'error': str(exc)}) from exc
         except Exception as exc:
@@ -933,8 +934,8 @@ def create_app(
     @app.get('/api/motion/jobs/{job_id}/trajectory')
     async def get_motion_trajectory(job_id: str) -> dict[str, Any]:
         try:
-            raw = motion_jobs.result(job_id, 'motion.npz')
-            return _load_trajectory(raw)
+            raw = await asyncio.to_thread(motion_jobs.result, job_id, 'motion.npz')
+            return await asyncio.to_thread(_load_trajectory, raw)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail={'error': str(exc)}) from exc
         except Exception as exc:
@@ -943,7 +944,7 @@ def create_app(
     @app.get('/api/motion/jobs/{job_id}/{artifact}')
     async def get_motion_artifact(job_id: str, artifact: str) -> Response:
         try:
-            body = motion_jobs.result(job_id, artifact)
+            body = await asyncio.to_thread(motion_jobs.result, job_id, artifact)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail={'error': str(exc)}) from exc
         except Exception as exc:
@@ -969,7 +970,7 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=400, detail={'error': 'invalid JSON request'}) from exc
         try:
-            return import_capture(motion_jobs, payload)
+            return await asyncio.to_thread(import_capture, motion_jobs, payload)
         except (FileExistsError, ImportConflict) as exc:
             raise HTTPException(status_code=409, detail={'error': str(exc)}) from exc
         except (ValueError, TypeError) as exc:

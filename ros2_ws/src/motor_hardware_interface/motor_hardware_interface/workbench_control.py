@@ -727,6 +727,7 @@ class WorkbenchControl(Node):
         self._last_status_json = None
         self._last_limit_errors = None
         self._last_dynamic_limits = None
+        self._last_publish_mono = 0.0
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._status_pub = self.create_publisher(String, '/control/status', latched)
         self._transmission_pub = self.create_publisher(String, '/robot_transmission/status', latched)
@@ -1434,13 +1435,16 @@ class WorkbenchControl(Node):
                          if self._stop_policy_id else ''))
         status_json = json.dumps(status, ensure_ascii=False)
         dynamic_limits = {name: limits[name] for name in self.mapping.dynamic_joint_names}
+        now_mono = time.monotonic()
         if (only_if_changed and status_json == self._last_status_json
                 and limit_errors == self._last_limit_errors
-                and not self._dynamic_limits_changed(dynamic_limits)):
+                and not self._dynamic_limits_changed(dynamic_limits)
+                and now_mono - self._last_publish_mono < 1.0):
             return
         self._last_status_json = status_json
         self._last_limit_errors = dict(limit_errors)
         self._last_dynamic_limits = dynamic_limits
+        self._last_publish_mono = now_mono
         self._status_pub.publish(String(data=status_json))
         self._transmission_pub.publish(String(data=build_transmission_status(
             model=self.model_name,

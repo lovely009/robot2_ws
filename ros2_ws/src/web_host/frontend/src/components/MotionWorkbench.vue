@@ -47,10 +47,13 @@ const error = ref('');
 const uploading = ref(false);
 const restoring = ref(false);
 const canvas = ref<HTMLCanvasElement>();
+const scrubberEl = ref<HTMLInputElement | null>(null);
+const timeTextEl = ref<HTMLElement | null>(null);
 const preview = ref<Preview>();
 const playing = ref(false);
 const modelStatus = ref('机器人骨架');
 const time = ref(0);
+let currentTime = 0;
 const live = ref(false);
 const busy = computed(() => uploading.value || restoring.value || job.value?.state === 'running');
 const canSubmit = computed(() => !live.value && !busy.value && !catalogLoading.value
@@ -89,7 +92,7 @@ watch([robotModel, urdf, upAxis, scale, catalogLoading], () => {
 async function modelText(modelName: string, file?: File) {
   if (!modelName) return file?.text();
   const name = encodeURIComponent(modelName);
-  const response = await fetch(`/robot_description/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
+  const response = await fetch(`/robot_sim/models/${name}/urdf/${name}.urdf`, { signal: abort.signal });
   if (!response.ok) throw Error(`模型 ${modelName} 的 URDF 加载失败`);
   return response.text();
 }
@@ -123,35 +126,47 @@ async function refreshSavedSources() {
 }
 
 async function loadCatalogs() {
-  const results = await Promise.allSettled([request('/api/motion/sources'), request('/api/models')]);
-  if (disposed) return;
-  const [actions, robots] = results;
-  if (actions.status === 'fulfilled' && Array.isArray(actions.value.sources)) {
-    sources.value = actions.value.sources.filter((name: unknown): name is string => typeof name === 'string');
-    const saved = sessionStorage.getItem('robot2.motionSource');
-    bvhSource.value = sources.value.find(name => name === saved) || sources.value[0] || '';
+  try {
+    const results = await Promise.allSettled([request('/api/motion/sources'), request('/api/models')]);
+    if (disposed) return;
+    const [actions, robots] = results;
+    if (actions.status === 'fulfilled' && Array.isArray(actions.value.sources)) {
+      sources.value = actions.value.sources.filter((name: unknown): name is string => typeof name === 'string');
+      const saved = sessionStorage.getItem('robot2.motionSource');
+      bvhSource.value = sources.value.find(name => name === saved) || sources.value[0] || '';
+    }
+    if (robots.status === 'fulfilled' && Array.isArray(robots.value.models)) {
+      models.value = robots.value.models.filter((name: unknown): name is string => typeof name === 'string');
+      const preferred = modelChosen.value ? robotModel.value : props.currentModel || robotModel.value;
+      robotModel.value = models.value.includes(preferred) ? preferred : models.value[0] || '';
+    } else robotModel.value = '';
+    if (results.some(result => result.status === 'rejected')) error.value = '库列表加载失败，可重试刷新或导入本地文件';
+  } finally {
+    catalogLoading.value = false;
   }
-  if (robots.status === 'fulfilled' && Array.isArray(robots.value.models)) {
-    models.value = robots.value.models.filter((name: unknown): name is string => typeof name === 'string');
-    const preferred = modelChosen.value ? robotModel.value : props.currentModel || robotModel.value;
-    robotModel.value = models.value.includes(preferred) ? preferred : models.value[0] || '';
-  } else robotModel.value = '';
-  if (results.some(result => result.status === 'rejected')) error.value = '库列表加载失败，可重试刷新或导入本地文件';
-  catalogLoading.value = false;
 }
 
-async function request(url: string, body?: unknown) {
-  const response = await fetch(url, { signal: abort.signal,
-    ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
-  let result: any = {};
-  try { result = await response.json(); } catch {}
-  if (!response.ok) {
-    const message = result?.error
-      || (typeof result?.detail === 'string' ? result.detail : result?.detail?.error)
-      || '动作请求失败';
-    throw Object.assign(Error(message), { status: response.status });
+async function request(url: string, body?: unknown, timeoutMs = 15000) {
+  const localAbort = new AbortController();
+  const onParentAbort = () => localAbort.abort();
+  abort.signal.addEventListener('abort', onParentAbort, { once: true });
+  const timer = setTimeout(() => localAbort.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: localAbort.signal,
+      ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
+    let result: any = {};
+    try { result = await response.json(); } catch {}
+    if (!response.ok) {
+      const message = result?.error
+        || (typeof result?.detail === 'string' ? result.detail : result?.detail?.error)
+        || '动作请求失败';
+      throw Object.assign(Error(message), { status: response.status });
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+    abort.signal.removeEventListener('abort', onParentAbort);
   }
-  return result;
 }
 
 function choose(event: Event, type: 'bvh' | 'urdf') {
@@ -159,10 +174,17 @@ function choose(event: Event, type: 'bvh' | 'urdf') {
   if (type === 'bvh') bvh.value = file; else urdf.value = file;
 }
 
-function showFrame() {
+function updateTransportDom() {
+  if (scrubberEl.value) scrubberEl.value.value = String(currentTime);
+  if (timeTextEl.value) timeTextEl.value.textContent = `${seconds(currentTime)} / ${seconds(preview.value?.duration || 0)}`;
+}
+
+function showFrame(t = time.value) {
+  currentTime = t;
+  updateTransportDom();
   if (!preview.value) return;
   const times = preview.value.times;
-  let index = times.findIndex(t => t > time.value);
+  let index = times.findIndex(v => v > currentTime);
   display?.show(index < 0 ? times.length - 1 : Math.max(0, index - 1));
 }
 
@@ -176,9 +198,10 @@ function stopTick() {
 function tick(now: number) {
   animation = 0;
   if (!playing.value || !preview.value || disposed) return;
-  time.value = Math.min(preview.value.duration, time.value + (now - lastTick) / 1000);
-  showFrame();
-  if (time.value >= preview.value.duration) {
+  currentTime = Math.min(preview.value.duration, currentTime + (now - lastTick) / 1000);
+  showFrame(currentTime);
+  if (currentTime >= preview.value.duration) {
+    time.value = currentTime;
     playing.value = false;
     return;
   }
@@ -188,9 +211,11 @@ function tick(now: number) {
 
 watch(playing, (isPlaying) => {
   if (isPlaying && preview.value && !disposed) {
+    currentTime = time.value;
     lastTick = performance.now();
     if (!animation) animation = requestAnimationFrame(tick);
   } else {
+    time.value = currentTime;
     stopTick();
   }
 });
@@ -231,7 +256,7 @@ async function accept(current: Job) {
     display = createMotionPreview(canvas.value!, data, {
       onModelStatus: (status: string) => { modelStatus.value = status; },
     });
-    time.value = 0;
+    time.value = currentTime = 0;
     playing.value = true;
     void refreshSavedSources();
   } else error.value = current.error || '转换失败，请检查文件与映射';
@@ -306,10 +331,11 @@ async function convert() {
 }
 
 function togglePlayback() {
-  if (preview.value && time.value >= preview.value.duration) time.value = 0;
-  lastTick = performance.now(); playing.value = !playing.value; showFrame();
+  if (preview.value && currentTime >= preview.value.duration) time.value = currentTime = 0;
+  else time.value = currentTime;
+  lastTick = performance.now(); playing.value = !playing.value; showFrame(currentTime);
 }
-function reset() { playing.value = false; time.value = 0; showFrame(); }
+function reset() { playing.value = false; time.value = currentTime = 0; showFrame(0); }
 
 onMounted(async () => {
   const playSource = sessionStorage.getItem('robot2.motionPlaySource');
@@ -421,8 +447,8 @@ onBeforeUnmount(() => {
       <div v-show="!live" class="motion-transport">
         <button :disabled="!ready" :aria-label="playing ? '暂停预览' : '播放预览'" @click="togglePlayback"><Pause v-if="playing" :size="17" /><Play v-else :size="17" /></button>
         <button :disabled="!ready" aria-label="回到动作起点" @click="reset"><RotateCcw :size="15" /></button>
-        <input v-model.number="time" type="range" min="0" :max="preview?.duration || 0" step=".001" :disabled="!ready" aria-label="动作播放进度" @input="playing = false; showFrame()" />
-        <span class="micro motion-time">{{ seconds(time) }} / {{ seconds(preview?.duration || 0) }}</span>
+        <input ref="scrubberEl" v-model.number="time" type="range" min="0" :max="preview?.duration || 0" step=".001" :disabled="!ready" aria-label="动作播放进度" @input="playing = false; showFrame(time)" />
+        <span ref="timeTextEl" class="micro motion-time">{{ seconds(time) }} / {{ seconds(preview?.duration || 0) }}</span>
       </div>
     </section>
 

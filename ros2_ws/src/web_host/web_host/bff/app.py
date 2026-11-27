@@ -1126,7 +1126,13 @@ def create_app(
             if target is None or not target.is_file():
                 raise HTTPException(status_code=404, detail='Not Found')
             if target.suffix.lower() in ('.stl', '.dae'):
-                return FileResponse(target, headers={'Cache-Control': 'public, max-age=0, must-revalidate'})
+                return FileResponse(
+                    target,
+                    headers={
+                        'Cache-Control': 'public, max-age=86400, immutable',
+                        'Content-Encoding': 'identity',
+                    },
+                )
             return FileResponse(target)
 
     @app.get('/', include_in_schema=False)

@@ -237,8 +237,8 @@ export function connect(explicitUrl?: string): void {
       onRtt: (rttMs) => {
         bffObserver?.onRtt?.(rttMs);
       },
-      onTelemetry: (channel, payload) => {
-        handleBffTelemetry(channel, payload);
+      onTelemetry: (channel, payload, meta) => {
+        handleBffTelemetry(channel, payload, meta);
       },
     });
     return;
@@ -373,7 +373,7 @@ function ingestMotion(m: any) {
   markDirty(DIRTY.MOTION);
 }
 
-function ingestState(m: any) {
+function ingestState(m: any, meta?: Record<string, unknown>) {
   if (!m) return;
   const previousSession = store.controlStates.session;
   const accepted = applyControlState(store.controlStates, m);
@@ -392,7 +392,8 @@ function ingestState(m: any) {
       fetchDeviceInfo(0).catch(() => {});
     }
   }
-  if (applyAgentWireStatus(store, m)) markDirty(DIRTY.CONN);
+  const serverTsMs = typeof meta?.server_ts_ms === 'number' ? meta.server_ts_ms : undefined;
+  if (applyAgentWireStatus(store, m, Date.now(), serverTsMs)) markDirty(DIRTY.CONN);
   const t = Date.now();
   for (const s of (m.statuses || [])) {
     const row = store.motors.get(s.motor_id) || {};
@@ -506,11 +507,11 @@ function ingestSimPositionStatus(raw: unknown) {
   markDirty(DIRTY.STATUS);
 }
 
-function handleBffTelemetry(channel: string, data: unknown) {
+function handleBffTelemetry(channel: string, data: unknown, meta?: Record<string, unknown>) {
   switch (channel) {
     case 'telemetry:transmission': ingestTransmission(data); break;
     case 'telemetry:motor_motion': ingestMotion(data); break;
-    case 'telemetry:motor_state': ingestState(data); break;
+    case 'telemetry:motor_state': ingestState(data, meta); break;
     case 'telemetry:events': ingestEvent(data); break;
     case 'telemetry:imu': ingestImu(data); break;
     case 'telemetry:imu_temp': ingestTemp(data); break;

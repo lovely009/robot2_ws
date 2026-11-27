@@ -1873,6 +1873,15 @@ input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px 
   align-items: center;
   gap: 6px;
 }
+.studio-topbar .topbar-status .micro {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 152px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .studio-topbar .stop-button {
   padding: 5px 10px;
   font-size: 12px;

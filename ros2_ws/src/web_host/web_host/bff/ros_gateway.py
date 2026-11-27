@@ -5,6 +5,7 @@ import array
 import collections
 from dataclasses import dataclass, field
 import json
+import math
 import threading
 import time
 from typing import Any, Callable, Protocol
@@ -12,20 +13,28 @@ from typing import Any, Callable, Protocol
 from .schemas import TopicHealth
 
 
+def _finite_float(value: Any) -> float | None:
+    """Convert numeric value to finite float, mapping NaN/Inf to None for valid JSON."""
+    f = float(value)
+    return f if math.isfinite(f) else None
+
+
 def _to_plain(value: Any) -> Any:
     """Recursively convert rosidl / ordereddict / array values into JSON primitives."""
-    if value is None or isinstance(value, (bool, int, float, str)):
+    if value is None or isinstance(value, (bool, int, str)):
         return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     if isinstance(value, (bytes, bytearray)):
         return list(value)
     if isinstance(value, array.array):
-        return list(value)
+        return [_to_plain(v) for v in value]
     if isinstance(value, dict):
         return {str(k): _to_plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_to_plain(v) for v in value]
     if hasattr(value, 'tolist'):
-        return value.tolist()
+        return _to_plain(value.tolist())
     return str(value)
 
 
@@ -55,9 +64,9 @@ def _motor_motion_to_dict(msg: Any) -> dict[str, Any]:
         'states': [
             {
                 'motor_id': int(s.motor_id),
-                'position': float(s.position),
-                'velocity': float(s.velocity),
-                'effort': float(s.effort),
+                'position': _finite_float(s.position),
+                'velocity': _finite_float(s.velocity),
+                'effort': _finite_float(s.effort),
                 'state_age_ms': int(s.state_age_ms),
                 'target_source': int(s.target_source),
             }
@@ -110,9 +119,9 @@ def _motor_state_to_dict(msg: Any) -> dict[str, Any]:
         'statuses': [
             {
                 'motor_id': int(s.motor_id),
-                'temperature': float(s.temperature),
-                'current': float(s.current),
-                'voltage': float(s.voltage),
+                'temperature': _finite_float(s.temperature),
+                'current': _finite_float(s.current),
+                'voltage': _finite_float(s.voltage),
                 'drive_mode': int(s.drive_mode),
                 'unified_fault_code': int(s.unified_fault_code),
                 'vendor_fault_code': int(s.vendor_fault_code),

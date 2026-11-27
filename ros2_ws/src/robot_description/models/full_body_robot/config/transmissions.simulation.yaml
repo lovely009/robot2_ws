@@ -1,0 +1,446 @@
+# 仿真直连传动配置：37 轴 1:1 映射 MJCF 电机轴，CW 转向与 transmissions.yaml 同源。
+transmissions:
+  sim_motor_01:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_01
+    joints:
+    - waist_yaw
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_02:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_02
+    joints:
+    - waist_flange_plus_x
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_03:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_03
+    joints:
+    - waist_flange_minus_x
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_04:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_04
+    joints:
+    - hips_flange_plus_x
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_05:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_05
+    joints:
+    - hips_flange_minus_x
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_06:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_06
+    joints:
+    - left_scapula_yaw
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_07:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_07
+    joints:
+    - left_shoulder_flange_linkage
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_08:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_08
+    joints:
+    - left_shoulder_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_09:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_09
+    joints:
+    - left_shoulder_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_10:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_10
+    joints:
+    - left_shoulder_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_11:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_11
+    joints:
+    - left_elbow_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_12:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_12
+    joints:
+    - left_forearm_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_13:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_13
+    joints:
+    - left_wrist_flange_proximal
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_14:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_14
+    joints:
+    - left_wrist_flange_distal
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_15:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_15
+    joints:
+    - right_scapula_yaw
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_16:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_16
+    joints:
+    - right_shoulder_flange_linkage
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_17:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_17
+    joints:
+    - right_shoulder_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_18:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_18
+    joints:
+    - right_shoulder_roll
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_19:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_19
+    joints:
+    - right_shoulder_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_20:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_20
+    joints:
+    - right_elbow_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_21:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_21
+    joints:
+    - right_forearm_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_22:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_22
+    joints:
+    - right_wrist_flange_proximal
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_23:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_23
+    joints:
+    - right_wrist_flange_distal
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_24:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_24
+    joints:
+    - left_hip_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_25:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_25
+    joints:
+    - left_hip_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_26:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_26
+    joints:
+    - left_hip_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_27:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_27
+    joints:
+    - left_knee_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_28:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_28
+    joints:
+    - left_shank_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_29:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_29
+    joints:
+    - left_ankle_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_30:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_30
+    joints:
+    - left_ankle_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_31:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_31
+    joints:
+    - right_hip_pitch
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_32:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_32
+    joints:
+    - right_hip_roll
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_33:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_33
+    joints:
+    - right_hip_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_34:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_34
+    joints:
+    - right_knee_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_35:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_35
+    joints:
+    - right_shank_yaw
+    actuator_reduction:
+    - 1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_36:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_36
+    joints:
+    - right_ankle_pitch
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0
+  sim_motor_37:
+    plugin: transmission_interface/SimpleTransmission
+    actuators:
+    - motor_37
+    joints:
+    - right_ankle_roll
+    actuator_reduction:
+    - -1
+    joint_reduction:
+    - 1
+    joint_offset:
+    - 0

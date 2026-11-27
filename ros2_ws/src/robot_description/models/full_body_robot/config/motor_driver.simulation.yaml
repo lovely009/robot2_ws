@@ -1,4 +1,4 @@
-# 仅供隔离总线 HIL；型号取自 CAD，输入轴取自 MJCF，不用于真机。
+# 仅供全机力矩仿真 HIL：型号取自 CAD，输入轴直接映射 full_body_robot.torque.xml 电机轴。
 motor_hardware:
   motor_specs_file: ../../../config/motor.yaml
   buses:
@@ -302,3 +302,4 @@ motor_hardware:
       command:
         kp: 0.008
         kd: 1.0
+  transmissions_file: transmissions.simulation.yaml

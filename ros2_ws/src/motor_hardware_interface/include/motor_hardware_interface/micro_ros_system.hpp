@@ -96,6 +96,8 @@ private:
   std::vector<double> command_position_;
   std::vector<double> command_velocity_;
   std::vector<double> command_effort_;
+  std::vector<double> recovery_min_;
+  std::vector<double> recovery_max_;
 
   std::shared_ptr<rclcpp::Node> node_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr position_limits_callback_;

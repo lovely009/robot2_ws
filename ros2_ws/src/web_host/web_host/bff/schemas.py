@@ -76,6 +76,7 @@ class JointTargetRequest(BaseModel):
     velocities: list[float] = Field(default_factory=list)
     efforts: list[float] = Field(default_factory=list)
     stamp_ns: int | None = None
+    frame_id: str = ''
 
 
 class TrajectoryPoint(BaseModel):
@@ -94,6 +95,7 @@ class TrajectoryRequest(BaseModel):
     joint_names: list[str]
     points: list[TrajectoryPoint]
     stamp_ns: int | None = None
+    frame_id: str = ''
 
 
 class PublishAck(BaseModel):

@@ -41,6 +41,7 @@ ASSEMBLY_TIMEOUT = 2.
 DYNAMIC_STATUS_PERIOD = 0.2
 DYNAMIC_LIMIT_EPS = 1e-4
 TRAJECTORY_MAX_POINTS = 8192  # 与网页一致，按展开后的电机路点计数。
+HOLD_COMPLIANCE_RAD = 0.02  # 软停/重力顺从导致未指令关节或起点轻微越过耦合箱式限位的容差。
 ACTION = '/host_control/trajectory_controller/follow_joint_trajectory'
 CHANNELS = ('position', 'velocity', 'effort')
 
@@ -174,25 +175,31 @@ class WorkbenchModel:
                   for name in self.joint_names}
         for name, axis in result.items():
             lower, upper, velocity, effort = self.limits[name]
+            uncommanded = name not in targets
             values = []
-            for value, low, high in ((axis.position, lower, upper),
-                                    (axis.velocity, -velocity, velocity),
-                                    (axis.effort, -effort, effort)):
+            for idx, (value, low, high) in enumerate(((axis.position, lower, upper),
+                                                      (axis.velocity, -velocity, velocity),
+                                                      (axis.effort, -effort, effort))):
                 if not math.isfinite(value):
                     raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
                 if low <= value <= high:
                     values.append(value)
                 else:
                     bounded = low if value < low else high
-                    # 只消除 float32 传输的舍入误差，下游仍使用原限位严格校验。
-                    if not math.isclose(value, bounded, rel_tol=2**-24, abs_tol=2**-150):
+                    # 未指令保持关节允许软停/重力顺从产生的微小越界并钳位到边界；
+                    # 显式目标仅消除 float32 传输舍入误差。
+                    if idx == 0 and uncommanded and abs(value - bounded) <= HOLD_COMPLIANCE_RAD:
+                        values.append(bounded)
+                    elif math.isclose(value, bounded, rel_tol=2**-24, abs_tol=2**-150):
+                        values.append(bounded)
+                    else:
                         raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
-                    values.append(bounded)
             result[name] = Axis(*values)
         # 其他组可原位保持；只校验本次会运动或施力的耦合组。
         moving_groups = [name for name, (joints, _, _, _) in self.workspace.groups.items()
-                         if any(result[joint].position != measured[joint].position
-                                or result[joint].velocity != 0. or result[joint].effort != 0.
+                         if any(joint in targets and (
+                                result[joint].position != measured[joint].position
+                                or result[joint].velocity != 0. or result[joint].effort != 0.)
                                 for joint in joints)]
         self.workspace.validate({name: axis.position for name, axis in result.items()}, groups=moving_groups)
         # 同一 Model 验证完整传动组，禁止在客户端再实现混控。
@@ -289,10 +296,25 @@ class WorkbenchModel:
             i, j = np.argwhere(~np.isfinite(V))[0]
             raise ValueError(f'{self.joint_names[j]} 目标非有限或超过 URDF P/V/E 限位')
 
+        commanded_mask = np.zeros(J, dtype=bool)
+        commanded_mask[col_idx] = True
+        start_idx = 1 if times_ns[0] == 0 else 0
+        for j in range(J):
+            if commanded_mask[j]:
+                continue
+            if m_pos[j] < lo[j] and lo[j] - m_pos[j] <= HOLD_COMPLIANCE_RAD:
+                P[start_idx:, j] = lo[j]
+            elif m_pos[j] > hi[j] and m_pos[j] - hi[j] <= HOLD_COMPLIANCE_RAD:
+                P[start_idx:, j] = hi[j]
+
         bad_p = (P < lo) | (P > hi)
         if bad_p.any():
             for i, j in np.argwhere(bad_p):
                 bounded = float(lo[j] if P[i, j] < lo[j] else hi[j])
+                if (i == 0 and times_ns[0] == 0
+                        and abs(float(P[i, j]) - bounded) <= HOLD_COMPLIANCE_RAD
+                        and P[i, j] == m_pos[j]):
+                    continue
                 if not math.isclose(float(P[i, j]), bounded, rel_tol=2**-24, abs_tol=2**-150):
                     raise ValueError(f'{self.joint_names[j]} 目标非有限或超过 URDF P/V/E 限位')
                 P[i, j] = bounded
@@ -318,12 +340,16 @@ class WorkbenchModel:
                         raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
                     if not low <= val <= high:
                         bounded = low if val < low else high
+                        if arr is P and abs(val - bounded) <= HOLD_COMPLIANCE_RAD:
+                            continue
                         if not math.isclose(val, bounded, rel_tol=2**-24, abs_tol=2**-150):
                             raise ValueError(f'{name} 目标非有限或超过 URDF P/V/E 限位')
                         arr[0, j] = bounded
 
         for group_name, (joints, lower, step, mask) in self.workspace.groups.items():
             j0, j1 = joint_index[joints[0]], joint_index[joints[1]]
+            if not commanded_mask[j0] and not commanded_mask[j1]:
+                continue
             moving = (P[:, j0] != m_pos[j0]) | (P[:, j1] != m_pos[j1]) | (V[:, j0] != 0.0) | (V[:, j1] != 0.0)
             if moving.any():
                 c0 = (P[moving, j0] - float(lower[0])) / step
@@ -351,8 +377,16 @@ class WorkbenchModel:
             p0, p1 = P_prev[nz], P[nz]
             v0, v1 = V_prev[nz], V[nz]
             dt = dt_arr[nz, None]
+            seg_lo = np.broadcast_to(lo, p0.shape).copy()
+            seg_hi = np.broadcast_to(hi, p0.shape).copy()
+            if len(p0):
+                for j in range(J):
+                    if m_pos[j] < lo[j] and lo[j] - m_pos[j] <= HOLD_COMPLIANCE_RAD:
+                        seg_lo[0, j] = float(m_pos[j])
+                    elif m_pos[j] > hi[j] and m_pos[j] - hi[j] <= HOLD_COMPLIANCE_RAD:
+                        seg_hi[0, j] = float(m_pos[j])
             if linear:
-                bad_pos = (p0 < lo) | (p0 > hi) | (p1 < lo) | (p1 > hi)
+                bad_pos = (p0 < seg_lo) | (p0 > seg_hi) | (p1 < lo) | (p1 > hi)
                 if bad_pos.any():
                     _, j = np.argwhere(bad_pos)[0]
                     raise ValueError(f'{self.joint_names[j]} 线性插值越过位置限位')
@@ -365,7 +399,7 @@ class WorkbenchModel:
                 a = 2.0 * p0 - 2.0 * p1 + dt * (v0 + v1)
                 b = -3.0 * p0 + 3.0 * p1 - dt * (2.0 * v0 + v1)
                 c = dt * v0
-                lo_tol, hi_tol = lo - 1e-7, hi + 1e-7
+                lo_tol, hi_tol = seg_lo - 1e-7, seg_hi + 1e-7
                 bad_pos = (p0 < lo_tol) | (p0 > hi_tol) | (p1 < lo_tol) | (p1 > hi_tol)
                 has_a = np.abs(a) > 1e-14
                 disc = 4.0 * b * b - 12.0 * a * c
@@ -401,10 +435,21 @@ class WorkbenchModel:
             dt1 = dt_arr[nz]
             for group, (joints, lower, step, mask) in self.workspace.groups.items():
                 j0, j1 = joint_index[joints[0]], joint_index[joints[1]]
+                if not commanded_mask[j0] and not commanded_mask[j1]:
+                    continue
                 o0, o1 = float(lower[0]), float(lower[1])
                 h0, h1 = mask.shape
-                x0, y0 = P_prev[nz, j0], P_prev[nz, j1]
+                x0, y0 = P_prev[nz, j0].copy(), P_prev[nz, j1].copy()
                 x3, y3 = P[nz, j0], P[nz, j1]
+                if len(x0):
+                    if m_pos[j0] < lo[j0] and lo[j0] - m_pos[j0] <= HOLD_COMPLIANCE_RAD:
+                        x0[0] = float(lo[j0])
+                    elif m_pos[j0] > hi[j0] and m_pos[j0] - hi[j0] <= HOLD_COMPLIANCE_RAD:
+                        x0[0] = float(hi[j0])
+                    if m_pos[j1] < lo[j1] and lo[j1] - m_pos[j1] <= HOLD_COMPLIANCE_RAD:
+                        y0[0] = float(lo[j1])
+                    elif m_pos[j1] > hi[j1] and m_pos[j1] - hi[j1] <= HOLD_COMPLIANCE_RAD:
+                        y0[0] = float(hi[j1])
                 if linear:
                     x1, y1, x2, y2 = x0, y0, x3, y3
                 else:
@@ -477,9 +522,13 @@ class WorkbenchModel:
                 if abs(p.position - q.position) > 1e-7 or abs(p.velocity - q.velocity) > 1e-7:
                     raise ValueError('零时刻目标必须与实测 P/V 连续')
                 continue
+            lower, upper, velocity, _ = self.limits[name]
+            eff_lo = p.position if (math.isfinite(p.position) and p.position < lower
+                                    and lower - p.position <= HOLD_COMPLIANCE_RAD) else lower
+            eff_hi = p.position if (math.isfinite(p.position) and p.position > upper
+                                    and p.position - upper <= HOLD_COMPLIANCE_RAD) else upper
             if linear:
-                lower, upper, velocity, _ = self.limits[name]
-                if not lower <= p.position <= upper or not lower <= q.position <= upper:
+                if not eff_lo <= p.position <= eff_hi or not lower <= q.position <= upper:
                     raise ValueError(f'{name} 线性插值越过位置限位')
                 speed = (q.position - p.position)/dt
                 if not math.isfinite(speed) or abs(speed) > velocity+1e-7:
@@ -496,8 +545,7 @@ class WorkbenchModel:
                                            (-2*b - math.sqrt(discriminant))/(6*a)))
             elif abs(b) > 1e-14:
                 position_times.append(-c/(2*b))
-            lower, upper, velocity, _ = self.limits[name]
-            lo_tol, hi_tol = lower - 1e-7, upper + 1e-7
+            lo_tol, hi_tol = eff_lo - 1e-7, eff_hi + 1e-7
             p0 = p.position
             for s in position_times:
                 if 0 <= s <= 1:

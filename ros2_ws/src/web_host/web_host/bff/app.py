@@ -502,6 +502,7 @@ def create_app(
             body.velocities,
             body.efforts,
             body.stamp_ns,
+            body.frame_id,
         )
         return PublishAck(
             accepted=True,
@@ -526,6 +527,7 @@ def create_app(
             body.velocities,
             body.efforts,
             body.stamp_ns,
+            body.frame_id,
         )
         return PublishAck(
             accepted=True,
@@ -547,6 +549,7 @@ def create_app(
             body.joint_names,
             [pt.model_dump() for pt in body.points],
             body.stamp_ns,
+            body.frame_id,
         )
         return PublishAck(
             accepted=True,
@@ -1130,6 +1133,7 @@ def create_app(
                         [float(v) for v in (msg.get('velocities') or [])],
                         [float(v) for v in (msg.get('efforts') or [])],
                         msg.get('stamp_ns'),
+                        str(msg.get('frame_id') or ''),
                     )
         except WebSocketDisconnect:
             pass

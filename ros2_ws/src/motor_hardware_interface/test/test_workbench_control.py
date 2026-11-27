@@ -1350,3 +1350,132 @@ def test_policy_defaults_follow_runtime_driver(files):
     del motors['a']['command']
     path.write_text(yaml.safe_dump(doc))
     assert wc.WorkbenchModel(driver, urdf).policy_defaults == {}
+
+
+def test_soft_stop_compliance_clamps_uncommanded_hold_and_allows_recovery(files):
+    model = wc.WorkbenchModel(*files)
+    # 模拟未指令关节(yaw/pitch)与被指令关节(elbow)因软停顺从轻微越过 [-1, 1] 限位
+    state = feedback()
+    state.position = [1.002, -1.002, 1.001]
+    state.velocity = [0., 0., 0.]
+    measured = model.feedback(state, NOW)
+    # 1) 未指令关节轻微越限时自动钳位到边界，且被指令关节从 1.001 回到 0.5 可通过校验
+    message = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[0.5], velocities=[0.],
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    result = model.joint_trajectory(message, measured, NOW)
+    assert list(result.points[-1].positions) == [1.0, -1.0, 0.5]
+    # 2) 未指令关节的 manual/joint_target 保持也会钳位到边界
+    target = JointState(name=['elbow'], position=[0.5], header=state.header)
+    held = model.joint_target(target, measured, NOW)
+    assert list(held.position) == [1.0, -1.0, 0.5]
+    # 3) 超过 HOLD_COMPLIANCE_RAD (0.02) 或显式指令越限仍被拒绝
+    bad_target = JointState(name=['elbow'], position=[1.001], header=state.header)
+    with pytest.raises(ValueError, match='限位'):
+        model.joint_target(bad_target, measured, NOW)
+    far_state = feedback()
+    far_state.position = [1.05, 0., 0.]
+    with pytest.raises(ValueError, match='限位'):
+        model.joint_trajectory(message, model.feedback(far_state, NOW), NOW)
+
+
+@pytest.mark.parametrize('linear', [False, True])
+def test_soft_stop_compliance_t0_trajectory_allows_recovery(files, linear):
+    model = wc.WorkbenchModel(*files)
+    state = feedback()
+    state.position = [1.002, -1.002, 1.001]
+    state.velocity = [0., 0., 0.]
+    measured = model.feedback(state, NOW)
+    vels = [] if linear else [0.]
+    message = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[1.001], velocities=vels,
+                             time_from_start=wc.Duration(sec=0)),
+        JointTrajectoryPoint(positions=[0.5], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    result = model.joint_trajectory(message, measured, NOW, linear=linear)
+    assert list(result.points[0].positions) == pytest.approx([1.002, -1.002, 1.001])
+    assert list(result.points[1].positions) == [1.0, -1.0, 0.5]
+
+    # 超过 HOLD_COMPLIANCE_RAD 或显式指令越限仍被拒绝
+    far_state = feedback()
+    far_state.position = [1.05, 0., 1.05]
+    far_msg = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[1.05], velocities=vels,
+                             time_from_start=wc.Duration(sec=0)),
+        JointTrajectoryPoint(positions=[0.5], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    with pytest.raises(ValueError, match='限位'):
+        model.joint_trajectory(far_msg, model.feedback(far_state, NOW), NOW, linear=linear)
+
+    bad_target_msg = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[1.001], velocities=vels,
+                             time_from_start=wc.Duration(sec=0)),
+        JointTrajectoryPoint(positions=[1.005], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    with pytest.raises(ValueError, match='限位'):
+        model.joint_trajectory(bad_target_msg, measured, NOW, linear=linear)
+
+
+@pytest.mark.parametrize('linear', [False, True])
+def test_soft_stop_compliance_uncommanded_coupled_group_succeeds(coupled_files, linear):
+    model = wc.WorkbenchModel(*coupled_files)
+    state = feedback()
+    state.position = [1.002, -1.002, 0.3]
+    state.velocity = [0., 0., 0.]
+    measured = model.feedback(state, NOW)
+
+    # 1) joint_target 仅指令 elbow 时，未指令的 yaw/pitch 耦合组钳位回边界不应触发耦合越界
+    target = JointState(name=['elbow'], position=[0.5], header=state.header)
+    held = model.joint_target(target, measured, NOW)
+    assert list(held.position) == [1.0, -1.0, 0.5]
+
+    # 2) joint_trajectory (含 t=0 与不含 t=0) 仅指令 elbow 时也应成功
+    vels = [] if linear else [0.]
+    msg_future = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[0.5], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    res_future = model.joint_trajectory(msg_future, measured, NOW, linear=linear)
+    assert list(res_future.points[-1].positions) == [1.0, -1.0, 0.5]
+
+    msg_t0 = JointTrajectory(joint_names=['elbow'], points=[
+        JointTrajectoryPoint(positions=[0.3], velocities=vels,
+                             time_from_start=wc.Duration(sec=0)),
+        JointTrajectoryPoint(positions=[0.5], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    res_t0 = model.joint_trajectory(msg_t0, measured, NOW, linear=linear)
+    assert list(res_t0.points[0].positions) == pytest.approx([1.002, -1.002, 0.3])
+    assert list(res_t0.points[-1].positions) == [1.0, -1.0, 0.5]
+
+    # 3) 被指令耦合关节从轻微越界恢复到可行区域也应通过
+    rec_state = feedback()
+    rec_state.position = [1.001, 0.0, 0.3]
+    rec_state.velocity = [0., 0., 0.]
+    rec_measured = model.feedback(rec_state, NOW)
+    rec_msg = JointTrajectory(joint_names=['yaw'], points=[
+        JointTrajectoryPoint(positions=[1.001], velocities=vels,
+                             time_from_start=wc.Duration(sec=0)),
+        JointTrajectoryPoint(positions=[0.5], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    rec_res = model.joint_trajectory(rec_msg, rec_measured, NOW, linear=linear)
+    assert list(rec_res.points[-1].positions) == [0.5, 0.0, 0.3]
+
+    # 4) 超过 HOLD_COMPLIANCE_RAD 或显式指令耦合关节越限仍被拒绝
+    far_state = feedback()
+    far_state.position = [1.05, 0., 0.3]
+    with pytest.raises(ValueError, match='限位'):
+        model.joint_trajectory(msg_future, model.feedback(far_state, NOW), NOW, linear=linear)
+
+    bad_coupled_msg = JointTrajectory(joint_names=['yaw'], points=[
+        JointTrajectoryPoint(positions=[1.005], velocities=vels,
+                             time_from_start=wc.Duration(sec=2)),
+    ])
+    with pytest.raises(ValueError, match='限位'):
+        model.joint_trajectory(bad_coupled_msg, rec_measured, NOW, linear=linear)
+
